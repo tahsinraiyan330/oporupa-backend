@@ -2,19 +2,18 @@ import os
 import json
 from flask import Flask, request, jsonify
 from mistralai import Mistral
-from flask_cors import CORS # Required to allow requests from your GitHub Pages domain
+from flask_cors import CORS 
 
 # --- Initialization ---
 app = Flask(__name__)
-# Enable CORS for all routes, allowing your GitHub Pages site to talk to this server
-CORS(app)
+# Enable CORS to allow your GitHub Pages site to talk to this server
+CORS(app) 
 
-# Retrieve the API Key from the environment variables (REQUIRED FOR SECURITY!)
+# Retrieve the API Key and Agent ID from the environment variables (SECURE!)
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 OPORUPA_V1_AGENT_ID = os.environ.get("OPORUPA_V1_AGENT_ID")
 
 # Initialize the Mistral Client
-# It will automatically use the MISTRAL_API_KEY from the environment
 if MISTRAL_API_KEY:
     try:
         client = Mistral(api_key=MISTRAL_API_KEY)
@@ -26,22 +25,30 @@ else:
     print("MISTRAL_API_KEY not found. API calls will fail.")
     client = None
 
-# A simple in-memory store to manage conversation IDs per session (basic approach)
+# A simple in-memory store to manage conversation IDs per session (basic state)
 conversation_sessions = {}
 
 # --- Helper Functions ---
 
 def get_session_id():
-    """Generates a simple session ID or uses one from the request."""
-    # This is a simple way; for production, you'd use cookies or JWTs.
+    """Retrieves the session ID sent from the frontend to manage history."""
+    # This uses the custom header defined in your frontend's script.js
     return request.headers.get('X-Session-ID', 'default_user')
 
 
-# --- API Endpoint ---
+# --- Server Routes ---
 
+# 1. Health Check Route (FIXES THE 502 BAD GATEWAY ERROR)
+@app.route('/', methods=['GET'])
+def index():
+    """Simple endpoint for Render health check and root URL access."""
+    return jsonify({"status": "Oporupa V1 Backend is Live"}), 200
+
+
+# 2. Main Chat API Endpoint
 @app.route('/chat', methods=['POST'])
 def chat():
-    # 1. Check client
+    # 1. Check for server readiness
     if not client or not OPORUPA_V1_AGENT_ID:
         return jsonify({"bot_response": "Server error: AI Agent is not configured. Contact the developer."}), 503
 
@@ -62,9 +69,8 @@ def chat():
             response = client.beta.conversations.append(
                 conversation_id=conversation_id,
                 inputs=user_message,
-                # Set store=True to maintain history for the agent (this is the default)
             )
-            # Mistral returns a new conversation ID on each append, so update the session
+            # Update the stored conversation ID (Mistral returns a new one on each append)
             conversation_sessions[session_id] = response.conversation_id
             
         else:
@@ -77,8 +83,7 @@ def chat():
             conversation_sessions[session_id] = response.conversation_id
 
         # 4. Extract Bot Response
-        # The content of the bot's reply is in the 'outputs' array
-        bot_reply = "Sorry, I couldn't get a response from Oporupa_V1."
+        bot_reply = "Oporupa V1 couldn't generate a definitive answer. Please try phrasing your legal question differently."
         if response.outputs and response.outputs[0].content:
             bot_reply = response.outputs[0].content
 
@@ -88,6 +93,6 @@ def chat():
         print(f"Mistral API Error: {e}")
         return jsonify({"bot_response": f"An unexpected error occurred while contacting Oporupa: {e}"}), 500
 
-# For Render deployment, we need a simple entry point
+# For local testing, though Render uses Gunicorn
 if __name__ == '__main__':
     app.run(debug=True)
